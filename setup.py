@@ -14,7 +14,11 @@ setup(
     author_email='yotamoron@yahoo.com',
     py_modules=['teamcityrestapiclient'],
     zip_safe=False,
-    install_requires=['requests'],
+    install_requires=['click', 'requests'],
+    entry_points = """\
+      [console_scripts]
+      pyteamcity = teamcityrestapiclient:cli
+    """,
     license='MIT',
     classifiers=[
         'Programming Language :: Python :: 2',

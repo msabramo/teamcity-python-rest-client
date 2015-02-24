@@ -2,15 +2,40 @@
 RESTful api definition: http://${TeamCity}/guestAuth/app/rest/application.wadl
 """
 
+import click
 import requests
+
+import os
 from datetime import datetime, timedelta
+import json
+
+
+@click.group()
+def cli():
+    """CLI for interacting with TeamCity"""
+
+
+@cli.group()
+def server():
+    """Commands related to the server instance"""
+
+
+@server.command(name='info')
+def project_list():
+    """Display info about TeamCity server"""
+    tc = TeamCityRESTApiClient()
+    tc.get_server_info()
+    output = json.dumps(tc.get_from_server(), indent=4)
+    click.echo(output)
 
 
 class TeamCityRESTApiClient:
-    def __init__(self, username, password, server, port):
-        self.TC_REST_URL = "http://%s:%d/httpAuth/app/rest/" % (server, port)
-        self.username = username
-        self.password = password
+    def __init__(self, username=None, password=None, server=None, port=None):
+        self.username = username or os.getenv('TEAMCITY_USER')
+        self.password = password or os.getenv('TEAMCITY_PASSWORD')
+        self.host = server or os.getenv('TEAMCITY_HOST')
+        self.port = port or int(os.getenv('TEAMCITY_PORT', 0)) or 80
+        self.TC_REST_URL = "http://%s:%d/httpAuth/app/rest/" % (self.host, self.port)
         self.locators = {}
         self.parameters = {}
 
