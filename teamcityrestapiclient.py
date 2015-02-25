@@ -2,12 +2,14 @@
 RESTful api definition: http://${TeamCity}/guestAuth/app/rest/application.wadl
 """
 
-import click
-import requests
-
 import os
 from datetime import datetime, timedelta
 import json
+import pprint
+
+import click
+import dateutil.parser
+import requests
 
 
 @click.group()
@@ -21,21 +23,59 @@ def server():
 
 
 @server.command(name='info')
-def project_list():
+def server_info():
     """Display info about TeamCity server"""
     tc = TeamCityRESTApiClient()
-    tc.get_server_info()
-    output = json.dumps(tc.get_from_server(), indent=4)
+    obj = tc.get_server_info()
+    # output = json.dumps(obj.__dict__, indent=4)
+    output = pprint.pformat(obj.__dict__)
     click.echo(output)
 
 
-class TeamCityRESTApiClient:
+class Session(requests.Session):
+    def build_url(self, *args, **kwargs):
+        """Builds a new API url from scratch."""
+        parts = [kwargs.get('base_url') or self.base_url]
+        parts.extend(args)
+        parts = [str(p) for p in parts]
+        return '/'.join(parts)
+
+
+class Resource(object):
+    def __init__(self, session=None):
+        if hasattr(session, '_session'):
+            # i.e. session is actually a GitHub object
+            session = session._session
+        elif session is None:
+            session = Session()
+        self._session = session
+
+    def _build_url(self, *args, **kwargs):
+        """Builds a new API url from scratch."""
+        return self._session.build_url(base_url=self.base_url, *args, **kwargs)
+
+
+class ServerInfo(Resource):
+    def __init__(self, data):
+        self.data = data
+        self.version = data.get('version')
+        self.version_major = data.get('versionMajor')
+        self.version_minor = data.get('versionMinor')
+        self.build_number = data.get('buildNumber')
+        self.internal_id = data.get('internalId')
+        self.current_time = dateutil.parser.parse(data.get('currentTime'))
+        self.start_time = dateutil.parser.parse(data.get('startTime'))
+        self.build_date = dateutil.parser.parse(data.get('buildDate'))
+
+
+class TeamCityRESTApiClient(Resource):
     def __init__(self, username=None, password=None, server=None, port=None):
+        super(TeamCityRESTApiClient, self).__init__()
         self.username = username or os.getenv('TEAMCITY_USER')
         self.password = password or os.getenv('TEAMCITY_PASSWORD')
         self.host = server or os.getenv('TEAMCITY_HOST')
         self.port = port or int(os.getenv('TEAMCITY_PORT', 0)) or 80
-        self.TC_REST_URL = "http://%s:%d/httpAuth/app/rest/" % (self.host, self.port)
+        self.base_url = "http://%s:%d/httpAuth/app/rest" % (self.host, self.port)
         self.locators = {}
         self.parameters = {}
 
@@ -137,64 +177,20 @@ class TeamCityRESTApiClient:
         self.locators['lookupLimit'] = lookup_limit
         return self
 
-
-    def set_tc_server(self, url, port):
-        self.TC_REST_URL = "http://%s:%s/httpAuth/app/rest/" % (url, port)
-        return self
-
-
-    def set_resource(self, resource):
-        self.resource = self.TC_REST_URL + resource
-        return self
-
-
-    def compose_resource_path(self):
-        """
-        Creates the URL by appending the resource, locators, and arguments in the appropriate places.
-
-        :return: the well-built URL to make the request with.
-        """
-        full_resource_url = self.resource
-        if self.locators:
-            locators = 'locator=' + ','.join([
-                "%s:%s" % (k, v)
-                for k, v in self.locators.items()
-            ])
-        else:
-            locators = ''
-        get_args = '&'.join([locators] + [
-            '%s=%s' % (k, v)
-            for k, v in self.parameters.items()
-        ])
-        if get_args:
-            full_resource_url = full_resource_url + '?' + get_args
-        return full_resource_url
-
-    def get_from_server(self):
-        """
-        Makes a request to the TeamCity server pointed to by this instance of the Client.
-        Uses httpAuth and accepts a JSON return.
-
-        Then it creates a Python dictionary by loading in the JSON.
-
-        :return: the Python dictionary which represents the JSON response.
-        """
-        full_resource_url = self.compose_resource_path()
-        response = requests.get(
-            full_resource_url,
+    def _get(self, url, **kwargs):
+        return requests.get(
+            url,
             auth=(self.username, self.password),
             headers={'Accept': 'application/json'})
-        return response.json()
-
 
     def get_server_info(self):
         """
         Gets server info of the TeamCity server pointed to by this instance of the Client.
-
-        :return: an instance of the Client with `resource = <url>/server`.
         """
-        return self.set_resource('server')
-
+        url = self._build_url('server')
+        response = self._get(url)
+        data = response.json()
+        return ServerInfo(data)
 
     def get_all_plugins(self):
         """
